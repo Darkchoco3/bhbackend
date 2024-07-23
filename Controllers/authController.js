@@ -1,177 +1,102 @@
-const USER = require("../model/userModel");
-// const sendEmail = require("../middleware/sendMail")
-const jwt = require ("jsonwebtoken");
-const crypto = require ("crypto")
-// registration
+const User = require("../model/userModel");
+const jwt = require("jsonwebtoken");
+const bcrypt = require("bcryptjs");
+
+// Registration endpoint
 const registration = async (req, res) => {
   try {
-    const { userName, email, password, confirmPassword } = req.body;
+    const { firstName, lastName, email, password } = req.body;
 
-    if (!userName || !email || !password || !confirmPassword) {
-      res.status(400).json({
+    // Validate input fields
+    if (!firstName || !lastName || !email || !password) {
+      return res.status(400).json({
         success: false,
-        message: "all fields are required to register...",
+        message: "All fields (firstName, lastName, email, password) are required to register.",
       });
-      return;
-    }
-    if (password !== confirmPassword) {
-      res
-        .status(400)
-        .json({
-          success: false,
-          message: "password and confirm password must match",
-        });
-      return;
     }
 
-    const existingEmail = await USER.findOne({ email });
+    // Check if email is already registered
+    const existingEmail = await User.findOne({ email });
     if (existingEmail) {
-      res.status(400).json({ success: false, message: "Email already in use" });
-      return;
+      return res.status(400).json({
+        success: false,
+        message: "Email address already in use.",
+      });
     }
 
-    const existingUserName = await USER.findOne({ userName });
-    if (existingUserName) {
-      res
-        .status(400)
-        .json({ success: false, message: "Username already in use" });
-      return;
-    }
+    // Create new user
+    const newUser = await User.create({ firstName, lastName, email, password });
 
-    const user = await USER.create({ ...req.body });
-    res
-      .status(201)
-      .json({ success: true, message: "registration successful", user });
+    // Generate JWT token
+    const token = jwt.sign({ userId: newUser._id }, process.env.JWT_SECRET, { expiresIn: '1h' });
+
+    // Return success response with token and user details
+    res.status(201).json({
+      success: true,
+      message: "Registration successful.",
+      user: {
+        firstName: newUser.firstName,
+        lastName: newUser.lastName,
+        email: newUser.email,
+        token,
+      },
+    });
   } catch (error) {
-    console.log(error.message);
-    res.status(500).json(error.message);
+    console.error(error.message);
+    res.status(500).json({ success: false, message: "Server error." });
   }
 };
 
-// login
+// Login endpoint
 const login = async (req, res) => {
   try {
     const { email, password } = req.body;
+
+    // Validate input fields
     if (!email || !password) {
-      res
-        .status(400)
-        .json({ success: false, message: "all fields are required to login" });
-      return;
-    }
-
-    //  finding a registration email address
-    const user = await USER.findOne({ email });
-    if (!user) {
-      res.status(404).json({ success: false, message: "wrong credentials" });
-      return;
-    }
-
-    // comparing password and validating password
-    const auth = await user.comparePassword(password);
-    if (!auth) {
-      res.status(404).json({ success: false, message: "wrong credentials" });
-      return;
-    }
-    //generating token
-    const token = await user.generateToken();
-    console.log(token);
-    if (token) {
-      res.status(201).json({
-        success: true,
-        message: "logged in",
-        user: {
-          userName: user.userName,
-          email: user.email,
-          token,
-        },
+      return res.status(400).json({
+        success: false,
+        message: "Email and password are required to login.",
       });
-      return;
     }
+
+    // Check if user exists
+    const user = await User.findOne({ email });
+    if (!user) {
+      return res.status(404).json({
+        success: false,
+        message: "User not found.",
+      });
+    }
+
+    // Validate password
+    const isMatch = await bcrypt.compare(password, user.password);
+    if (!isMatch) {
+      return res.status(400).json({
+        success: false,
+        message: "Invalid credentials.",
+      });
+    }
+
+    // Generate JWT token
+    const token = jwt.sign({ userId: user._id }, process.env.JWT_SECRET, { expiresIn: '1h' });
+
+    // Return success response with token and user details
+    res.status(200).json({
+      success: true,
+      message: "Login successful.",
+      user: {
+        firstName: user.firstName,
+        lastName: user.lastName,
+        email: user.email,
+        token,
+      },
+    });
+
   } catch (error) {
-    console.log(error.message);
-    res.status(500).json(error.message);
+    console.error(error.message);
+    res.status(500).json({ success: false, message: "Server error." });
   }
 };
-//get username
-const getUserName = async (req, res) => {
-  const { userId } = req.user;
-  const user = await USER.findOne({ _id: userId });
-  res.status(200).json({ success: true, userName: user.userName });
-};
 
-//isLoggedIn function
-// const isLoggedIn =(req,res)=>{
-// try{
-//     const authHeader = req.headers.authorization;
-//     const token = authHeader.split(" ")[1];
-//     if(!token){
-//         res.json(false);
-//         return;
-//     }
-//     jwt.verify(token,process.env.JWT_SECRET);
-//      res.json(true);
-// }catch(error) {
-// console.log(error.message);
-// res.json(false)
-// }
-// };
-// forgot password ftn
-// const forgotPassword = async (req, res,next) => {
-//   const { email } = req.body;
-//   try {
-//     const user = await USER.findOne({ email });
-//     if (!user) {
-//       return res
-//         .status(404)
-//         .json({ success: false, message: "email not found" });
-//     }
-//     const resetToken = user.getResetPasswordToken();
-//     await user.save();
-//     const resetUrl = `http://localhost:5174/resetpassword/${resetToken}`;
-//     const message = `<h1>You have requested for a password reset </h1> <p>Please go to this link to reset your password</p> <a href=${resetUrl} clicktracking = off> ${resetUrl} </a> `;
-//     try {
-//       await sendEmail({
-//         to: user.email,
-//         subject: "Password Reset Request",
-//         text: message,
-//       });
-//       res.status(200).json({success:true,data:"Email sent"})
-//     } catch (error) {
-//       user.getResetPasswordToken = undefined;
-//       user.getResetPasswordExpire = undefined;
-//       await user.save();
-//       return res.status(500).json({ message: "Email couldnt be sent", error });
-//     }
-//   } catch (error) {
-//     res.json(error.message);
-//   }
-// };
-// // reset password ftn
-// const resetPassword = async (req,res)=>{
-//   const resetPasswordToken = crypto.createHash("sha256").update(req.params.resetToken).digest("hex");
-//   try {
-//     const user = await USER.findOne({
-//       resetPasswordToken,
-//       resetPasswordExpire:{$gt:Date.now()}
-//       // resetPasswordExpire:{$gt:Date('2024-12-20')}
-
-//     })
-//     if(!user){
-//       return res.status(400).json({status:false,message:"invalid Reset Token"})
-//     }
-//     user.password = req.body.password;
-//     user.resetPasswordToken = undefined;
-//     user.resetPasswordExpire = undefined;
-
-//     await user.save();
-//     res.status(201).json({success:true,message:"Password Reset Successfull"})
-    
-//   } catch (error) {
-//     res.status(500).json(error.message)
-    
-//   }
-// }
-
-
-
-module.exports = { registration, login, getUserName };
+module.exports = { registration, login };

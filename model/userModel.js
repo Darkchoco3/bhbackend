@@ -1,112 +1,81 @@
 const mongoose = require('mongoose');
 const Schema = mongoose.Schema;
 const validator = require('validator');
-const bcrypt = require('bcryptjs')
-const jwt= require ("jsonwebtoken");
-const crypto = require("crypto")
+const bcrypt = require('bcryptjs');
+const jwt = require("jsonwebtoken");
+const crypto = require("crypto");
 
 const userSchema = new Schema(
   {
-    userName: {
+    firstName: {
       type: String,
       required: true,
       trim: true,
-      unique: [true, 'username already in use'],
+    },
+    lastName: {
+      type: String,
+      required: true,
+      trim: true,
     },
     email: {
       type: String,
       trim: true,
-      required: [true, 'Email address is required'],
-      unique: [true, 'Email already in use'],
+      required: true,
+      unique: true,
       lowercase: true,
-      validate(value) {
-        if (!validator.isEmail(value)) {
-          throw new Error('Email is invalid');
-        }
+      validate: {
+        validator: validator.isEmail,
+        message: 'Invalid email address',
       },
     },
     password: {
       type: String,
       trim: true,
-      required: [true, 'Please enter a password'],
-      minlength: [8, 'Minimum password should be 8 character'],
+      required: true,
+      minlength: 8,
     },
-    // profilePhoto: {
-    //   type: String,
-    //   default:
-    //     'https://www.istockphoto.com/vector/friends-characters-people-holding-hands-hugging-each-other-and-standing-together-gm1174348875-326567582',
-    // },
-    // bio: {
-    //   type: String,
-    //   default: 'Hi, I am new here...',
-    // },
-    // role: {
-    //   type: String,
-    //   enum: ['user', 'admin'],
-    //   default: 'user',
-    // },
-    // age: {
-    //   type: Number,
-    // },
-    // gender: {
-    //   type: String,
-    // },
-    // location: {
-    //   type: String,
-    // },
-    // occupation: {
-    //   type: String,
-    // },
-    // x: {
-    //   type: String,
-    // },
-    // linkedIn: {
-    //   type: String,
-    // },
-    // followers: [{ type: mongoose.Schema.ObjectId, ref: 'User' }],
-    // following: [{ type: mongoose.Schema.ObjectId, ref: 'User' }],
-    resetPasswordToken:String,
-    resetPasswordExpire:Date,
+    resetPasswordToken: String,
+    resetPasswordExpire: Date,
   },
   { timestamps: true }
 );
 
-// hashing passsword
+// Hash password before saving
 userSchema.pre('save', async function (next) {
   if (!this.isModified('password')) {
-    next();
+    return next();
   }
-  const salt = await bcrypt.genSalt();
-  this.password = await bcrypt.hash(this.password, salt);
-  next();
+  try {
+    const salt = await bcrypt.genSalt();
+    this.password = await bcrypt.hash(this.password, salt);
+    return next();
+  } catch (error) {
+    return next(error);
+  }
 });
 
-// password comparison
-userSchema.methods.comparePassword = async function 
-(userPassword){
-    const isCorrect = await bcrypt.compare(userPassword,this.password);
-    return isCorrect;
-}
-// generate jwt token
+// Compare password method
+userSchema.methods.comparePassword = async function (userPassword) {
+  try {
+    return await bcrypt.compare(userPassword, this.password);
+  } catch (error) {
+    throw new Error(error);
+  }
+};
 
-userSchema.methods.generateToken = async function (params) {
-    let token = jwt.sign({userId:this._id,userName:this.userName},process.env.JWT_SECRET);
-    return token;
-  };
+// Generate JWT token
+userSchema.methods.generateToken = function () {
+  return jwt.sign({ userId: this._id }, process.env.JWT_SECRET, { expiresIn: '1h' });
+};
 
-
-// generating reset password token
+// Generate reset password token
 userSchema.methods.getResetPasswordToken = function () {
-  const resetToken = crypto.randomBytes(20).toString("hex");
-  this.resetPasswordToken = crypto
-    .createHash("sha256")
-    .update(resetToken)
-    .digest("hex");
-  this.resetPasswordExpire = Date.now() + 10 * (60 * 1000);
+  const resetToken = crypto.randomBytes(20).toString('hex');
+  this.resetPasswordToken = crypto.createHash('sha256').update(resetToken).digest('hex');
+  this.resetPasswordExpire = Date.now() + 10 * 60 * 1000; // 10 minutes
   return resetToken;
 };
 
+const User = mongoose.model('User', userSchema);
 
-const USER = mongoose.model('User', userSchema);
-
-module.exports = USER;
+module.exports = User;
